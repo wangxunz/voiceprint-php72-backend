@@ -1,5 +1,5 @@
 ﻿<?php
-// public/index.php - 入口路由 (PHP 7.2 兼容，多前缀适配)
+// public/index.php - 入口路由 (PATH_INFO 模式，不需要 .htaccess)
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
@@ -11,17 +11,26 @@ require_once __DIR__ . '/../controllers/VoiceprintController.php';
 require_once __DIR__ . '/../controllers/ConversionController.php';
 
 $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
-$uri    = isset($_SERVER['REQUEST_URI']) ? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : '/';
-$uri    = rtrim($uri, '/');
 
-// +++ 改动在这里：原来只认 /v1，现在循环匹配多个前缀
-$route = $uri;
-$prefixes = array('/v1', '/VoicePrint');
-foreach ($prefixes as $prefix) {
-    if (strpos($uri, $prefix) === 0) {
-        $route = (string)substr($uri, strlen($prefix));
+// PATH_INFO 路由: /VoicePrint/index.php/health -> route = /health
+$pathInfo = isset($_SERVER['PATH_INFO']) ? $_SERVER['PATH_INFO'] : '';
+$reqUri   = isset($_SERVER['REQUEST_URI']) ? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : '/';
+
+if ($pathInfo !== '' && $pathInfo !== '/') {
+    $route = rtrim($pathInfo, '/');
+} else {
+    $route = rtrim($reqUri, '/');
+    $prefixes = array('/v1', '/VoicePrint');
+    foreach ($prefixes as $prefix) {
+        if (strpos($route, $prefix) === 0) {
+            $route = (string)substr($route, strlen($prefix));
+            if ($route === '') { $route = '/'; }
+            break;
+        }
+    }
+    if (strpos($route, '/index.php') === 0) {
+        $route = (string)substr($route, strlen('/index.php'));
         if ($route === '') { $route = '/'; }
-        break;
     }
 }
 
@@ -60,7 +69,7 @@ try {
     else {
         Response::error('接口不存在: ' . $route, 404);
     }
-} catch (\Throwable $e) {
+} catch (Throwable $e) {
     $config = require __DIR__ . '/../config.php';
     $msg = $config['debug']
         ? $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine()
