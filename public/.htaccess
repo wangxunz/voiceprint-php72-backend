@@ -1,10 +1,19 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteBase /
+
+    # RewriteBase 要根据你的部署目录来改
+    # 当前部署在 /VoicePrint/ 下
+    RewriteBase /VoicePrint/
+
+    # 如果文件或目录真实存在则不重写
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
+
+    # 所有请求都交给 index.php
     RewriteRule ^(.*)$ index.php [QSA,L]
 </IfModule>
+
+# 禁止直接访问上传目录
 <IfModule mod_rewrite.c>
     RewriteRule ^uploads/ - [F,L]
     RewriteRule ^results/ - [F,L]
