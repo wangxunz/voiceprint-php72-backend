@@ -66,7 +66,7 @@ class VoiceprintController
         $logFile = escapeshellarg($this->config['paths']['logs'] . '/enroll.log');
 
         $cmd = sprintf(
-            '%s %s --voiceprint-id %s --audio-file %s >> %s 2>&1 &',
+            'PYTHONIOENCODING=utf-8 %s %s --voiceprint-id %s --audio-file %s >> %s 2>&1 &',
             $pythonCmd, $scriptCmd, $idArg, $fileArg, $logFile
         );
 

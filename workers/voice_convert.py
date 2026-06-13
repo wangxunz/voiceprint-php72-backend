@@ -1,13 +1,13 @@
 ﻿#!/usr/bin/env python3
-# workers/voice_convert.py - 变声处理流水线
+# workers/voice_convert.py - Voice conversion流水线
 """
 用法: python3 voice_convert.py --task-id task_xxx
 
 处理流水线:
 1. 加载任务信息（从数据库）
 2. 更新状态: separating → 调用 Spleeter/Demucs 分离人声
-3. 更新状态: converting → 调用 RVC/So-VITS-SVC 执行声纹转换
-4. 更新状态: rendering → 合成最终音频（变声人声 + 伴奏）
+3. 更新状态: converting → 调用 RVC/So-VITS-SVC 执行Voiceprint conversion
+4. 更新状态: rendering → 合成最终音频（变声人声 + Accompaniment）
 5. 完成 → 写结果文件 + 更新状态为 completed
 """
 
@@ -93,9 +93,9 @@ def update_progress(db, task_id, state, progress, error=None):
         kwargs['error_message'] = error
     update_task(db, task_id, **kwargs)
 
-# ---- 步骤 1: 人声分离 ----
+# ---- 步骤 1: Vocal separation ----
 def separate_vocals(song_path, output_dir, task_id, config):
-    """使用 Spleeter 或 Demucs 分离人声和伴奏"""
+    """使用 Spleeter 或 Demucs 分离人声和Accompaniment"""
     spleeter = config['python']['spleeter_path']
     
     print(f'  [separate] 分离人声: {song_path}')
@@ -123,13 +123,13 @@ def separate_vocals(song_path, output_dir, task_id, config):
         
         if os.path.exists(vocals_path):
             print(f'  [separate] 人声: {vocals_path}')
-            print(f'  [separate] 伴奏: {accompaniment_path}')
+            print(f'  [separate] Accompaniment: {accompaniment_path}')
             return vocals_path, accompaniment_path
         else:
             raise FileNotFoundError(f'Spleeter 未生成预期文件: {vocals_path}')
             
     except subprocess.TimeoutExpired:
-        raise RuntimeError('人声分离超时')
+        raise RuntimeError('Vocal separation超时')
     except FileNotFoundError:
         print(f'  [separate] 未找到 Spleeter，尝试 Demucs...')
         return separate_with_demucs(song_path, output_dir, task_id, config)
@@ -159,9 +159,9 @@ def separate_with_demucs(song_path, output_dir, task_id, config):
             raise FileNotFoundError(f'Demucs 未生成预期文件: {vocals_path}')
             
     except subprocess.TimeoutExpired:
-        raise RuntimeError('人声分离超时(Demucs)')
+        raise RuntimeError('Vocal separation超时(Demucs)')
 
-# ---- 步骤 2: 声纹转换 ----
+# ---- 步骤 2: Voiceprint conversion ----
 def convert_voice(vocals_path, voiceprint_embedding, output_path, pitch_shift, config):
     """
     将分离出的人声替换为目标声纹
@@ -182,7 +182,7 @@ def convert_voice(vocals_path, voiceprint_embedding, output_path, pitch_shift, c
         return convert_with_openvoice(vocals_path, voiceprint_embedding, output_path, pitch_shift)
 
 def convert_with_rvc(vocals_path, embedding_path, output_path, pitch_shift, rvc_path):
-    """使用 RVC 进行声纹转换"""
+    """使用 RVC 进行Voiceprint conversion"""
     import numpy as np
     
     embedding = np.load(embedding_path)
@@ -211,7 +211,7 @@ def convert_with_rvc(vocals_path, embedding_path, output_path, pitch_shift, rvc_
     return output_path
 
 def convert_with_openvoice(vocals_path, embedding_path, output_path, pitch_shift):
-    """使用 OpenVoice 进行零样本声纹转换"""
+    """使用 OpenVoice 进行零样本Voiceprint conversion"""
     import numpy as np
     import librosa
     import soundfile as sf
@@ -277,7 +277,7 @@ def fallback_pitch_shift(input_path, output_path, semitones):
 
 # ---- 步骤 3: 合成最终音频 ----
 def mix_audio(converted_vocals_path, accompaniment_path, output_path):
-    """将变声后的人声与伴奏混合"""
+    """将变声后的人声与Accompaniment混合"""
     import librosa
     import soundfile as sf
     import numpy as np
@@ -302,7 +302,7 @@ def mix_audio(converted_vocals_path, accompaniment_path, output_path):
     vocals = np.pad(vocals, (0, max_len - len(vocals)))
     accomp = np.pad(accomp, (0, max_len - len(accomp)))
     
-    # 混合: 人声 70% + 伴奏 100%
+    # 混合: 人声 70% + Accompaniment 100%
     mixed = vocals * 0.7 + accomp * 1.0
     
     # 防止削波
@@ -318,9 +318,9 @@ def mix_audio(converted_vocals_path, accompaniment_path, output_path):
     print(f'  [mix] 混音完成: {output_path} ({duration:.1f}s)')
     return duration
 
-# ---- 主流程 ----
+# ---- Main ----
 def main():
-    parser = argparse.ArgumentParser(description='变声处理流水线')
+    parser = argparse.ArgumentParser(description='Voice conversion流水线')
     parser.add_argument('--task-id', required=True, help='任务 ID')
     args = parser.parse_args()
 
@@ -348,15 +348,15 @@ def main():
         task_dir = os.path.join(config['paths']['temp'], task_id)
         os.makedirs(task_dir, exist_ok=True)
 
-        # ---- 步骤 1: 人声分离 ----
-        print(f'\n[{datetime.now()}] 步骤 1/3: 人声分离')
+        # ---- 步骤 1: Vocal separation ----
+        print(f'\n[{datetime.now()}] 步骤 1/3: Vocal separation')
         update_progress(db, task_id, 'separating', 10)
         
         vocals_path, accomp_path = separate_vocals(song_path, task_dir, task_id, config)
         update_progress(db, task_id, 'separating', 33)
 
-        # ---- 步骤 2: 声纹转换 ----
-        print(f'\n[{datetime.now()}] 步骤 2/3: 声纹转换')
+        # ---- 步骤 2: Voiceprint conversion ----
+        print(f'\n[{datetime.now()}] 步骤 2/3: Voiceprint conversion')
         update_progress(db, task_id, 'converting', 40)
         
         converted_path = os.path.join(task_dir, f'{task_id}_converted.wav')

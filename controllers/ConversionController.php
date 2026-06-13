@@ -234,7 +234,7 @@ class ConversionController
         $logFile = escapeshellarg($this->config['paths']['logs'] . '/convert.log');
 
         $cmd = sprintf(
-            '%s %s --task-id %s >> %s 2>&1 &',
+            'PYTHONIOENCODING=utf-8 %s %s --task-id %s >> %s 2>&1 &',
             $pythonCmd, $scriptCmd, $idArg, $logFile
         );
 

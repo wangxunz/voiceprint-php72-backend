@@ -1,13 +1,13 @@
 ﻿#!/usr/bin/env python3
 # workers/voiceprint_enroll.py - 声纹特征提取脚本
 """
-用法: python3 voiceprint_enroll.py --voiceprint-id vp_xxx --audio-file /path/to/audio.wav
+Usage: python3 voiceprint_enroll.py --voiceprint-id vp_xxx --audio-file /path/to/audio.wav
 
-流程:
-1. 加载音频 → 重采样到 16kHz 单声道
-2. 调用 SpeakerEncoder 提取声纹特征向量
-3. 保存特征向量到 .npy 文件
-4. 更新数据库状态为 ready
+Flow:
+1. Load audio -> resample to 16kHz mono
+2. Call SpeakerEncoder to extract voiceprint feature vector
+3. Save feature vector to .npy file
+4. Update database status to ready
 """
 
 import argparse
@@ -17,14 +17,14 @@ import json
 import traceback
 from datetime import datetime
 
-# 项目根目录（worker 在 workers/ 子目录）
+# Project root (worker is in workers/ subdir)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-# ---- 配置 ----
+# ---- Config ----
 def load_config():
     config_path = os.path.join(PROJECT_ROOT, 'config.php')
-    # PHP 配置简单解析为 Python dict（或使用环境变量）
+    # Parse PHP config as Python dict (or use env vars)
     return {
         'db': {
             'host': os.getenv('DB_HOST', '127.0.0.1'),
@@ -40,7 +40,7 @@ def load_config():
         }
     }
 
-# ---- 数据库 ----
+# ---- Database ----
 def get_db(config):
     try:
         import pymysql
@@ -84,44 +84,44 @@ def update_voiceprint_status(db, voiceprint_id, status, embedding_path=None, err
         )
     cursor.close()
 
-# ---- 音频处理 ----
+# ---- Audio Processing ----
 def preprocess_audio(audio_path, target_sr=16000):
-    """加载并预处理音频: 重采样到 target_sr, 转单声道"""
+    """Load and preprocess audio: resample to target_sr, convert to mono"""
     try:
         import librosa
         import soundfile as sf
     except ImportError:
-        print('[ERROR] 请安装依赖: pip install librosa soundfile', file=sys.stderr)
+        print('[ERROR] Please install: pip install librosa soundfile', file=sys.stderr)
         raise
 
     audio, sr = librosa.load(audio_path, sr=target_sr, mono=True)
     return audio, target_sr
 
-# ---- 声纹提取 ----
+# ---- Voiceprint Extraction ----
 def extract_voiceprint(audio, sr=16000):
     """
-    提取声纹特征向量
+    Extract voiceprint feature vector
     
-    实现方案 (按推荐度排序):
+    Options (ordered by ease of use):
     1. Resemblyzer (最易用) — pip install resemblyzer
     2. SpeechBrain ECAPA-TDNN (更高精度)
     3. WeSpeaker / CAM++ (中文优化)
     
-    此处使用 Resemblyzer 作为默认方案
+    Using Resemblyzer as default
     """
     try:
         from resemblyzer import VoiceEncoder
     except ImportError:
-        print('[ERROR] 请安装 Resemblyzer: pip install resemblyzer', file=sys.stderr)
-        print('[INFO] 或安装 SpeechBrain: pip install speechbrain', file=sys.stderr)
+        print('[ERROR] Please install Resemblyzer: pip install resemblyzer', file=sys.stderr)
+        print('[INFO] Or install SpeechBrain: pip install speechbrain', file=sys.stderr)
         raise
 
     encoder = VoiceEncoder()
-    # 提取嵌入向量 (256维)
+    # Extract embedding vector (256-dim)
     embedding = encoder.embed_utterance(audio)
     return embedding  # shape: (256,)
 
-# ---- 主流程 ----
+# ---- Main ----
 def main():
     parser = argparse.ArgumentParser(description='声纹特征提取')
     parser.add_argument('--voiceprint-id', required=True, help='声纹 ID')
@@ -131,39 +131,39 @@ def main():
     voiceprint_id = args.voiceprint_id
     audio_path = args.audio_file
 
-    print(f'[{datetime.now()}] 开始提取声纹: {voiceprint_id}')
-    print(f'  音频文件: {audio_path}')
+    print(f'[{datetime.now()}] Starting voiceprint extraction: {voiceprint_id}')
+    print(f'  Audio file: {audio_path}')
 
     config = load_config()
     db = get_db(config)
 
     try:
-        # 更新状态为 extracting
+        # Update status -> extracting
         update_voiceprint_status(db, voiceprint_id, 'extracting')
-        print('  状态: extracting')
+        print('  Status: extracting')
 
-        # 预处理
+        # Preprocess
         audio, sr = preprocess_audio(audio_path)
-        print(f'  音频加载: {len(audio)/sr:.1f}s, {sr}Hz')
+        print(f'  Audio loaded: {len(audio)/sr:.1f}s, {sr}Hz')
 
         if len(audio) / sr < 3:
-            raise ValueError(f'音频过短 ({len(audio)/sr:.1f}s)，至少需要 3 秒')
+            raise ValueError(f'Audio too short ({len(audio)/sr:.1f}s)，need at least 3 seconds')
 
-        # 提取特征
+        # Extract features
         embedding = extract_voiceprint(audio, sr)
-        print(f'  特征提取完成, 维度: {embedding.shape}')
+        print(f'  Feature extraction complete, dim: {embedding.shape}')
 
-        # 保存特征向量
+        # Save feature vector
         import numpy as np
         embedding_dir = os.path.join(config['paths']['voiceprints'], 'embeddings')
         os.makedirs(embedding_dir, exist_ok=True)
         embedding_path = os.path.join(embedding_dir, f'{voiceprint_id}.npy')
         np.save(embedding_path, embedding)
-        print(f'  特征已保存: {embedding_path}')
+        print(f'  Feature saved: {embedding_path}')
 
-        # 更新数据库
+        # Update database
         update_voiceprint_status(db, voiceprint_id, 'ready', embedding_path=embedding_path)
-        print(f'[{datetime.now()}] 声纹提取成功: {voiceprint_id}')
+        print(f'[{datetime.now()}] Voiceprint extraction successful: {voiceprint_id}')
 
     except Exception as e:
         error_msg = f'{type(e).__name__}: {e}'
