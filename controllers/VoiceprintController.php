@@ -1,8 +1,8 @@
 ﻿<?php
 class VoiceprintController
 {
-    private array $config;
-    private FileUpload $uploader;
+    private $config;
+    private $uploader;
 
     public function __construct()
     {

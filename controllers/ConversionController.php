@@ -1,7 +1,7 @@
 ﻿<?php
 class ConversionController
 {
-    private array $config;
+    private $config;
 
     public function __construct()
     {
