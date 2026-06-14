@@ -62,7 +62,11 @@ def get_db(config):
         )
 
 def get_task(db, task_id):
-    cursor = db.cursor(dictionary=True)
+    try:
+        cursor = db.cursor(dictionary=True)
+    except TypeError:
+        import pymysql
+        cursor = db.cursor(pymysql.cursors.DictCursor)
     cursor.execute(
         'SELECT t.*, v.embedding_path, v.file_path as voiceprint_file '
         'FROM conversion_tasks t '
