@@ -1,14 +1,14 @@
 ﻿#!/usr/bin/env python3
-# workers/voice_convert.py - Voice conversion流水线
+# workers/voice_convert.py - Voice conversion pipeline
 """
-用法: python3 voice_convert.py --task-id task_xxx
+Usage: python3 voice_convert.py --task-id task_xxx
 
-处理流水线:
-1. 加载任务信息（从数据库）
-2. 更新状态: separating → 调用 Spleeter/Demucs 分离人声
-3. 更新状态: converting → 调用 RVC/So-VITS-SVC 执行Voiceprint conversion
-4. 更新状态: rendering → 合成最终音频（变声人声 + Accompaniment）
-5. 完成 → 写结果文件 + 更新状态为 completed
+Processing pipeline:
+1. Load task info from database
+2. Update status: separating -> call Spleeter/Demucs to separate vocals
+3. Update status: converting -> call RVC/So-VITS-SVC to run voiceprint conversion
+4. Update status: rendering -> synthesize final audio (converted vocal + accompaniment)
+5. Complete -> write result file + update status to completed
 """
 
 import argparse
@@ -22,7 +22,7 @@ from datetime import datetime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-# ---- 配置 ----
+# ---- Config ----
 def load_config():
     return {
         'db': {
@@ -44,7 +44,7 @@ def load_config():
         }
     }
 
-# ---- 数据库 ----
+# ---- Database ----
 def get_db(config):
     try:
         import pymysql
@@ -93,17 +93,17 @@ def update_progress(db, task_id, state, progress, error=None):
         kwargs['error_message'] = error
     update_task(db, task_id, **kwargs)
 
-# ---- 步骤 1: Vocal separation ----
+# ---- Step 1: Vocal separation ----
 def separate_vocals(song_path, output_dir, task_id, config):
-    """使用 Spleeter 或 Demucs 分离人声和Accompaniment"""
+    """Use Spleeter or Demucs to separate vocals and accompaniment"""
     spleeter = config['python']['spleeter_path']
     
-    print(f'  [separate] 分离人声: {song_path}')
+    print(f'  [separate] separate vocals: {song_path}')
     
-    # 尝试使用 spleeter
+    # Trying spleeter
     cmd = [
         spleeter, 'separate',
-        '-p', 'spleeter:2stems',  # 2 轨道: vocals + accompaniment
+        '-p', 'spleeter:2stems',  # 2 stems: vocals + accompaniment
         '-o', output_dir,
         song_path
     ]
@@ -111,31 +111,31 @@ def separate_vocals(song_path, output_dir, task_id, config):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=config['python']['timeout'])
         if result.returncode != 0:
-            # 回退到 demucs
-            print(f'  [separate] Spleeter 失败，尝试 Demucs...')
+            # Fallback to Demucs
+            print(f'  [separate] Spleeter failed, trying Demucs...')
             print(f'  [separate] stderr: {result.stderr[:200]}')
             return separate_with_demucs(song_path, output_dir, task_id, config)
         
-        # Spleeter 输出目录: output_dir/<filename>/
+        # Spleeter output dir: output_dir/<filename>/
         base_name = os.path.splitext(os.path.basename(song_path))[0]
         vocals_path = os.path.join(output_dir, base_name, 'vocals.wav')
         accompaniment_path = os.path.join(output_dir, base_name, 'accompaniment.wav')
         
         if os.path.exists(vocals_path):
-            print(f'  [separate] 人声: {vocals_path}')
+            print(f'  [separate] Vocals: {vocals_path}')
             print(f'  [separate] Accompaniment: {accompaniment_path}')
             return vocals_path, accompaniment_path
         else:
-            raise FileNotFoundError(f'Spleeter 未生成预期文件: {vocals_path}')
+            raise FileNotFoundError(f'Spleeter did not produce expected file: {vocals_path}')
             
     except subprocess.TimeoutExpired:
-        raise RuntimeError('Vocal separation超时')
+        raise RuntimeError('Vocal separation timeout')
     except FileNotFoundError:
-        print(f'  [separate] 未找到 Spleeter，尝试 Demucs...')
+        print(f'  [separate] Spleeter not found, trying Demucs...')
         return separate_with_demucs(song_path, output_dir, task_id, config)
 
 def separate_with_demucs(song_path, output_dir, task_id, config):
-    """使用 Demucs 分离人声"""
+    """Use Demucs to separate vocals"""
     cmd = [
         'python3', '-m', 'demucs',
         '--two-stems', 'vocals',
@@ -146,7 +146,7 @@ def separate_with_demucs(song_path, output_dir, task_id, config):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=config['python']['timeout'])
         if result.returncode != 0:
-            raise RuntimeError(f'Demucs 失败: {result.stderr[:300]}')
+            raise RuntimeError(f'Demucs failed: {result.stderr[:300]}')
         
         base_name = os.path.splitext(os.path.basename(song_path))[0]
         model_dir = os.path.join(output_dir, 'htdemucs', base_name)
@@ -156,39 +156,39 @@ def separate_with_demucs(song_path, output_dir, task_id, config):
         if os.path.exists(vocals_path):
             return vocals_path, no_vocals_path
         else:
-            raise FileNotFoundError(f'Demucs 未生成预期文件: {vocals_path}')
+            raise FileNotFoundError(f'Demucs did not produce expected file: {vocals_path}')
             
     except subprocess.TimeoutExpired:
-        raise RuntimeError('Vocal separation超时(Demucs)')
+        raise RuntimeError('Vocal separation timeout(Demucs)')
 
-# ---- 步骤 2: Voiceprint conversion ----
+# ---- Step 2: Voiceprint conversion ----
 def convert_voice(vocals_path, voiceprint_embedding, output_path, pitch_shift, config):
     """
-    将分离出的人声替换为目标声纹
+    Replace separated vocals with target voiceprint
     
-    推荐方案:
-    1. RVC (Retrieval-based Voice Conversion) — 最佳音质
-    2. So-VITS-SVC — 中文优化
-    3. OpenVoice — 轻量级，支持零样本
+    Recommended solutions:
+    1. RVC (Retrieval-based Voice Conversion) - best quality
+    2. So-VITS-SVC - Chinese-optimized
+    3. OpenVoice - lightweight, zero-shot
     
-    此脚本提供 RVC 和 OpenVoice 两种接口
+    Script supports RVC and OpenVoice
     """
     rvc_path = config['python'].get('rvc_path', '')
     
     if rvc_path and os.path.exists(rvc_path):
         return convert_with_rvc(vocals_path, voiceprint_embedding, output_path, pitch_shift, rvc_path)
     else:
-        print('  [convert] RVC 路径未配置，使用 OpenVoice 方案')
+        print('  [convert] RVC path not configured, using OpenVoice')
         return convert_with_openvoice(vocals_path, voiceprint_embedding, output_path, pitch_shift)
 
 def convert_with_rvc(vocals_path, embedding_path, output_path, pitch_shift, rvc_path):
-    """使用 RVC 进行Voiceprint conversion"""
+    """Using RVC for voiceprint conversion"""
     import numpy as np
     
     embedding = np.load(embedding_path)
     
-    # RVC 推理脚本调用
-    # 实际部署时需根据 RVC 项目结构调整路径和参数
+    # RVC inference script call
+    # Adjust paths for RVC project structure in deployment
     infer_script = os.path.join(rvc_path, 'infer.py')
     if not os.path.exists(infer_script):
         infer_script = os.path.join(rvc_path, 'tools', 'infer.py')
@@ -202,50 +202,50 @@ def convert_with_rvc(vocals_path, embedding_path, output_path, pitch_shift, rvc_
         '--f0method', 'rmvpe',
     ]
     
-    print(f'  [convert] RVC 推理: {" ".join(cmd)}')
+    print(f'  [convert] RVC inference: {" ".join(cmd)}')
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     
     if result.returncode != 0:
-        raise RuntimeError(f'RVC 转换失败: {result.stderr[:300]}')
+        raise RuntimeError(f'RVC conversion failed: {result.stderr[:300]}')
     
     return output_path
 
 def convert_with_openvoice(vocals_path, embedding_path, output_path, pitch_shift):
-    """使用 OpenVoice 进行零样本Voiceprint conversion"""
+    """Using OpenVoice for zero-shot voiceprint conversion"""
     import numpy as np
     import librosa
     import soundfile as sf
     
-    print('  [convert] 使用 OpenVoice 进行零样本转换')
+    print('  [convert] Using OpenVoice for zero-shot conversion')
     
-    # 加载人声音频
+    # Loading vocal audio
     audio, sr = librosa.load(vocals_path, sr=16000, mono=True)
     
-    # 加载声纹嵌入
+    # Loading voiceprint embedding
     embedding = np.load(embedding_path)
     
     try:
-        # 尝试导入 OpenVoice
+        # Trying to import OpenVoice
         from openvoice import se_extractor
         from openvoice.api import ToneColorConverter
         
-        # 创建 ToneColorConverter
-        # 注意：实际使用时需要先下载模型
+        # Creating ToneColorConverter
+        # Note: download model before use
         ckpt_converter = os.path.join(PROJECT_ROOT, 'models', 'converter')
         
         if not os.path.exists(ckpt_converter):
             raise FileNotFoundError(
-                f'OpenVoice 模型未下载，请先执行:\n'
+                f'OpenVoice model not downloaded, run:\n'
                 f'  git clone https://github.com/myshell-ai/OpenVoice.git\n'
-                f'  并下载检查点到 models/converter/'
+                f'  and download checkpoint to models/converter/'
             )
         
         tone_converter = ToneColorConverter(ckpt_converter, device='cpu')
         
-        # 提取源音频的音色
+        # Extract source audio tone
         source_se, _ = se_extractor.get_se(vocals_path, tone_converter, vad=False)
         
-        # 执行转换
+        # Running conversion
         converted = tone_converter.convert(
             audio_src_path=vocals_path,
             src_se=source_se,
@@ -256,12 +256,12 @@ def convert_with_openvoice(vocals_path, embedding_path, output_path, pitch_shift
         return output_path
         
     except ImportError:
-        # 回退方案: 简单重采样 + 音调变换（仅作演示）
-        print('  [convert] OpenVoice 未安装，使用简化方案（仅音调变换）')
+        # Fallback: simple resample + pitch shift (demo only)
+        print('  [convert] OpenVoice not installed, using simplified (pitch shift only)')
         return fallback_pitch_shift(vocals_path, output_path, pitch_shift)
 
 def fallback_pitch_shift(input_path, output_path, semitones):
-    """回退方案：仅做音调变换"""
+    """Fallback: pitch shift only"""
     import librosa
     import soundfile as sf
     
@@ -272,23 +272,23 @@ def fallback_pitch_shift(input_path, output_path, semitones):
     os.makedirs(output_dir, exist_ok=True)
     sf.write(output_path, shifted, sr)
     
-    print(f'  [convert] 音调变换完成: {semitones} 半音')
+    print(f'  [convert] Pitch shift complete: {semitones} semitones')
     return output_path
 
-# ---- 步骤 3: 合成最终音频 ----
+# ---- Step 3: Synthesize final audio ----
 def mix_audio(converted_vocals_path, accompaniment_path, output_path):
-    """将变声后的人声与Accompaniment混合"""
+    """Mix converted vocals with accompaniment"""
     import librosa
     import soundfile as sf
     import numpy as np
     
-    print(f'  [mix] 混音: vocals + accompaniment')
+    print(f'  [mix] Mixing: vocals + accompaniment')
     
-    # 加载音轨
+    # Loading tracks
     vocals, sr1 = librosa.load(converted_vocals_path, sr=None, mono=False)
     accomp, sr2 = librosa.load(accompaniment_path, sr=None, mono=False)
     
-    # 统一采样率
+    # Unifying sample rate
     target_sr = 44100
     if sr1 != target_sr:
         vocals = librosa.resample(y=vocals if vocals.ndim == 1 else vocals[0], 
@@ -297,15 +297,15 @@ def mix_audio(converted_vocals_path, accompaniment_path, output_path):
         accomp = librosa.resample(y=accomp if accomp.ndim == 1 else accomp[0],
                                    orig_sr=sr2, target_sr=target_sr)
     
-    # 确保长度一致
+    # Ensuring length consistency
     max_len = max(len(vocals), len(accomp))
     vocals = np.pad(vocals, (0, max_len - len(vocals)))
     accomp = np.pad(accomp, (0, max_len - len(accomp)))
     
-    # 混合: 人声 70% + Accompaniment 100%
+    # Mix: vocals 70% + accompaniment 100%
     mixed = vocals * 0.7 + accomp * 1.0
     
-    # 防止削波
+    # Preventing clipping
     max_val = np.abs(mixed).max()
     if max_val > 0.99:
         mixed = mixed / max_val * 0.95
@@ -315,70 +315,70 @@ def mix_audio(converted_vocals_path, accompaniment_path, output_path):
     sf.write(output_path, mixed, target_sr)
     
     duration = len(mixed) / target_sr
-    print(f'  [mix] 混音完成: {output_path} ({duration:.1f}s)')
+    print(f'  [mix] Mix complete: {output_path} ({duration:.1f}s)')
     return duration
 
 # ---- Main ----
 def main():
-    parser = argparse.ArgumentParser(description='Voice conversion流水线')
-    parser.add_argument('--task-id', required=True, help='任务 ID')
+    parser = argparse.ArgumentParser(description='Voice conversion pipeline')
+    parser.add_argument('--task-id', required=True, help='Task ID')
     args = parser.parse_args()
 
     task_id = args.task_id
     config = load_config()
     db = get_db(config)
 
-    print(f'[{datetime.now()}] 开始处理任务: {task_id}')
+    print(f'[{datetime.now()}] Starting task: {task_id}')
 
     try:
-        # 加载任务
+        # Loading task
         task = get_task(db, task_id)
         if not task:
-            raise ValueError(f'任务不存在: {task_id}')
+            raise ValueError(f'Task not found: {task_id}')
         
         song_path = task['song_file_path']
         voiceprint_id = task['voiceprint_id']
         embedding_path = task['embedding_path']
         pitch_shift = task['pitch_shift']
         
-        print(f'  歌曲: {task["song_name"]} ({song_path})')
-        print(f'  声纹: {voiceprint_id}')
-        print(f'  音调偏移: {pitch_shift} 半音')
+        print(f'  Song: {task["song_name"]} ({song_path})')
+        print(f'  Voiceprint: {voiceprint_id}')
+        print(f'  Pitch shift: {pitch_shift} semitones')
 
         task_dir = os.path.join(config['paths']['temp'], task_id)
         os.makedirs(task_dir, exist_ok=True)
 
-        # ---- 步骤 1: Vocal separation ----
-        print(f'\n[{datetime.now()}] 步骤 1/3: Vocal separation')
+        # ---- Step 1: Vocal separation ----
+        print(f'\n[{datetime.now()}] Step 1/3: Vocal separation')
         update_progress(db, task_id, 'separating', 10)
         
         vocals_path, accomp_path = separate_vocals(song_path, task_dir, task_id, config)
         update_progress(db, task_id, 'separating', 33)
 
-        # ---- 步骤 2: Voiceprint conversion ----
-        print(f'\n[{datetime.now()}] 步骤 2/3: Voiceprint conversion')
+        # ---- Step 2: Voiceprint conversion ----
+        print(f'\n[{datetime.now()}] Step 2/3: Voiceprint conversion')
         update_progress(db, task_id, 'converting', 40)
         
         converted_path = os.path.join(task_dir, f'{task_id}_converted.wav')
         convert_voice(vocals_path, embedding_path, converted_path, pitch_shift, config)
         update_progress(db, task_id, 'converting', 70)
 
-        # ---- 步骤 3: 合成输出 ----
-        print(f'\n[{datetime.now()}] 步骤 3/3: 合成输出')
+        # ---- Step 3: Synthesize output ----
+        print(f'\n[{datetime.now()}] Step 3/3: Synthesize output')
         update_progress(db, task_id, 'rendering', 80)
         
         result_path = os.path.join(config['paths']['results'], f'{task_id}.mp3')
         duration = mix_audio(converted_path, accomp_path, result_path)
 
-        # 完成
+        # Complete
         update_task(db, task_id,
                     state='completed',
                     progress=100,
                     result_path=result_path,
                     song_duration=int(duration))
         
-        print(f'\n[{datetime.now()}] 任务完成: {task_id}')
-        print(f'  结果文件: {result_path}')
+        print(f'\n[{datetime.now()}] Task complete: {task_id}')
+        print(f'  Result file: {result_path}')
 
     except Exception as e:
         error_msg = f'{type(e).__name__}: {str(e)[:500]}'

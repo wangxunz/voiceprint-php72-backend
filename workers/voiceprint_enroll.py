@@ -1,5 +1,5 @@
 ﻿#!/usr/bin/env python3
-# workers/voiceprint_enroll.py - 声纹特征提取脚本
+# workers/voiceprint_enroll.py - Voiceprint feature extraction script
 """
 Usage: python3 voiceprint_enroll.py --voiceprint-id vp_xxx --audio-file /path/to/audio.wav
 
@@ -103,9 +103,9 @@ def extract_voiceprint(audio, sr=16000):
     Extract voiceprint feature vector
     
     Options (ordered by ease of use):
-    1. Resemblyzer (最易用) — pip install resemblyzer
-    2. SpeechBrain ECAPA-TDNN (更高精度)
-    3. WeSpeaker / CAM++ (中文优化)
+    1. Resemblyzer (easiest) — pip install resemblyzer
+    2. SpeechBrain ECAPA-TDNN (higher accuracy)
+    3. WeSpeaker / CAM++ (Chinese-optimized)
     
     Using Resemblyzer as default
     """
@@ -123,9 +123,9 @@ def extract_voiceprint(audio, sr=16000):
 
 # ---- Main ----
 def main():
-    parser = argparse.ArgumentParser(description='声纹特征提取')
-    parser.add_argument('--voiceprint-id', required=True, help='声纹 ID')
-    parser.add_argument('--audio-file', required=True, help='音频文件路径')
+    parser = argparse.ArgumentParser(description='Voiceprint feature extraction')
+    parser.add_argument('--voiceprint-id', required=True, help='Voiceprint ID')
+    parser.add_argument('--audio-file', required=True, help='Audio file path')
     args = parser.parse_args()
 
     voiceprint_id = args.voiceprint_id
