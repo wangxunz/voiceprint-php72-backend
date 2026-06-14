@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // utils/FileUpload.php - 文件上传处理 (PHP 7.2 兼容)
 
 class FileUpload

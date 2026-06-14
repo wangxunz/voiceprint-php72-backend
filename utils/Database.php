@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // utils/Database.php - PDO 数据库封装 (PHP 7.2 兼容)
 
 class Database

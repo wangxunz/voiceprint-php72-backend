@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // public/index.php - 入口路由 (PATH_INFO 模式，不需要 .htaccess)
 error_reporting(E_ALL);
 ini_set('display_errors', '0');

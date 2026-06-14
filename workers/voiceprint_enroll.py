@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # workers/voiceprint_enroll.py - Voiceprint feature extraction script
 """
 Usage: python3 voiceprint_enroll.py --voiceprint-id vp_xxx --audio-file /path/to/audio.wav

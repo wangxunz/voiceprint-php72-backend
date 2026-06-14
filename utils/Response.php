@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // utils/Response.php - JSON 响应工具 (PHP 7.2 兼容)
 
 class Response

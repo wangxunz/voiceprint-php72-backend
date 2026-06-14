@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // controllers/HealthController.php - 健康检查 (PHP 7.2 兼容)
 
 class HealthController

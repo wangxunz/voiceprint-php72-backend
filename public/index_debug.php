@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // index_debug.php - 诊断入口（显示所有错误）
 error_reporting(E_ALL);
 ini_set('display_errors', '1');

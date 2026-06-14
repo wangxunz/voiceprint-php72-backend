@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # workers/voice_convert.py - Voice conversion pipeline
 """
 Usage: python3 voice_convert.py --task-id task_xxx

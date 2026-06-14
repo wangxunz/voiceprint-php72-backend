@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // config.php - 应用配置 (PHP 7.2 兼容)
 return array(
     'db' => array(
