@@ -99,7 +99,10 @@ def update_progress(db, task_id, state, progress, error=None):
 
 # ---- Step 1: Vocal separation ----
 def separate_vocals(song_path, output_dir, task_id, config):
-    """Use Spleeter or Demucs to separate vocals and accompaniment"""
+    """Use Spleeter or Demucs to separate vocals and accompaniment.
+    Returns (vocals_path, accompaniment_path).
+    If no separation tool is available, returns (song_path, None) and the
+    whole file will be treated as vocals without accompaniment."""
     spleeter = config['python']['spleeter_path']
     
     print(f'  [separate] separate vocals: {song_path}')
@@ -107,7 +110,7 @@ def separate_vocals(song_path, output_dir, task_id, config):
     # Trying spleeter
     cmd = [
         spleeter, 'separate',
-        '-p', 'spleeter:2stems',  # 2 stems: vocals + accompaniment
+        '-p', 'spleeter:2stems',
         '-o', output_dir,
         song_path
     ]
@@ -115,12 +118,10 @@ def separate_vocals(song_path, output_dir, task_id, config):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=config['python']['timeout'])
         if result.returncode != 0:
-            # Fallback to Demucs
             print(f'  [separate] Spleeter failed, trying Demucs...')
             print(f'  [separate] stderr: {result.stderr[:200]}')
-            return separate_with_demucs(song_path, output_dir, task_id, config)
+            return _try_demucs_or_fallback(song_path, output_dir, task_id, config)
         
-        # Spleeter output dir: output_dir/<filename>/
         base_name = os.path.splitext(os.path.basename(song_path))[0]
         vocals_path = os.path.join(output_dir, base_name, 'vocals.wav')
         accompaniment_path = os.path.join(output_dir, base_name, 'accompaniment.wav')
@@ -136,7 +137,18 @@ def separate_vocals(song_path, output_dir, task_id, config):
         raise RuntimeError('Vocal separation timeout')
     except FileNotFoundError:
         print(f'  [separate] Spleeter not found, trying Demucs...')
+        return _try_demucs_or_fallback(song_path, output_dir, task_id, config)
+    except Exception:
+        print(f'  [separate] Spleeter failed, trying Demucs...')
+        return _try_demucs_or_fallback(song_path, output_dir, task_id, config)
+
+def _try_demucs_or_fallback(song_path, output_dir, task_id, config):
+    try:
         return separate_with_demucs(song_path, output_dir, task_id, config)
+    except Exception as e:
+        print(f'  [separate] Demucs also failed: {e}')
+        print(f'  [separate] No separation tools available - using whole file as vocals')
+        return song_path, None  # no accompaniment, use entire file as vocals
 
 def separate_with_demucs(song_path, output_dir, task_id, config):
     """Use Demucs to separate vocals"""
@@ -372,7 +384,17 @@ def main():
         update_progress(db, task_id, 'rendering', 80)
         
         result_path = os.path.join(config['paths']['results'], f'{task_id}.mp3')
-        duration = mix_audio(converted_path, accomp_path, result_path)
+        
+        if accomp_path is not None and os.path.exists(accomp_path):
+            duration = mix_audio(converted_path, accomp_path, result_path)
+        else:
+            # No accompaniment available, use converted vocals directly
+            import shutil, soundfile as sf, librosa
+            os.makedirs(os.path.dirname(result_path), exist_ok=True)
+            audio, sr = librosa.load(converted_path, sr=44100, mono=False)
+            sf.write(result_path, audio.T if audio.ndim > 1 else audio, 44100)
+            duration = len(audio) / 44100 if audio.ndim == 1 else len(audio[0]) / 44100
+            print(f'  [mix] No accompaniment - using converted vocals directly: {duration:.1f}s')
 
         # Complete
         update_task(db, task_id,
