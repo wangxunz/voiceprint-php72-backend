@@ -105,7 +105,7 @@ class FileUpload
      * @param string $ext
      * @return string
      */
-    public static function getResultUrl($taskId, $ext = 'mp3')
+    public static function getResultUrl($taskId, $ext = 'wav')
     {
         $config = require __DIR__ . '/../config.php';
         return rtrim($config['result_base_url'], '/') . sprintf('/%s.%s', $taskId, $ext);
