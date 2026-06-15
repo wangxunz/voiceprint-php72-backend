@@ -58,7 +58,7 @@ try {
         (new ConversionController())->status();
     }
     elseif ($method === 'GET' && $route === '/conversion/result') {
-        (new ConversionController())->getResult();
+        (new ConversionController())->result();
     }
     elseif ($method === 'POST' && $route === '/conversion/delete') {
         (new ConversionController())->delete();
