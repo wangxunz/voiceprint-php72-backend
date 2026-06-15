@@ -383,7 +383,7 @@ def main():
         print(f'\n[{datetime.now()}] Step 3/3: Synthesize output')
         update_progress(db, task_id, 'rendering', 80)
         
-        result_path = os.path.join(config['paths']['results'], f'{task_id}.mp3')
+        result_path = os.path.join(config['paths']['results'], f'{task_id}.wav')
         
         if accomp_path is not None and os.path.exists(accomp_path):
             duration = mix_audio(converted_path, accomp_path, result_path)
